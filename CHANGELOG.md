@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.9] - 2025-02-21
+
+### Added
+- Added GitHub Actions workflow for linting
+- Added comprehensive test coverage for Confluence and Jira services
+- Added new Jira tools: create_issue, update_issue, delete_issue
+- Added Cursor IDE configuration documentation
+
+### Changed
+- Enhanced Jira issue management methods with improved error handling
+- Updated installation instructions with detailed configuration examples
+
+### Fixed
+- Fixed URL generation in Confluence methods by removing '/wiki' prefix
+- Improved environment variable handling in configuration
+
 ## [0.1.8] - 2025-02-16
 
 ### Added
