@@ -5,6 +5,21 @@ Atlassian Cloud and Data Center instances. It handles:
 - OAuth configuration for both Cloud and Data Center
 - Token acquisition, storage, and refresh
 - Session configuration for API clients
+
+Environment Variables for OAuth Configuration:
+- ATLASSIAN_OAUTH_CLIENT_ID: OAuth client ID (required)
+- ATLASSIAN_OAUTH_CLIENT_SECRET: OAuth client secret (required)
+- ATLASSIAN_OAUTH_REDIRECT_URI: OAuth redirect URI (required)
+- ATLASSIAN_OAUTH_SCOPE: OAuth scope (required)
+- ATLASSIAN_OAUTH_INSTANCE_TYPE: "cloud" or "datacenter" (defaults to "cloud")
+- ATLASSIAN_OAUTH_INSTANCE_URL: Instance URL (required for Data Center)
+- ATLASSIAN_OAUTH_CLOUD_ID: Cloud ID (Cloud only, optional)
+
+Data Center OAuth Setup:
+1. Configure Application Link in your Data Center instance
+2. Set ATLASSIAN_OAUTH_INSTANCE_TYPE=datacenter
+3. Set ATLASSIAN_OAUTH_INSTANCE_URL to your instance URL
+4. Configure client credentials and scope as needed
 """
 
 import json
