@@ -16,7 +16,7 @@ class ConfluenceConfig:
 
     Handles authentication for Confluence Cloud and Server/Data Center:
     - Cloud: username/API token (basic auth) or OAuth 2.0 (3LO)
-    - Server/DC: personal access token or basic auth
+    - Server/DC: personal access token, basic auth, or OAuth 2.0
     """
 
     url: str  # Base URL for Confluence
@@ -78,8 +78,8 @@ class ConfluenceConfig:
         # Use the shared utility function directly
         is_cloud = is_atlassian_cloud_url(url)
 
-        if oauth_config and oauth_config.cloud_id:
-            # OAuth takes precedence if fully configured
+        if oauth_config and cls._is_oauth_fully_configured(oauth_config):
+            # OAuth takes precedence if fully configured for either Cloud or Data Center
             auth_type = "oauth"
         elif is_cloud:
             if username and api_token:
@@ -124,6 +124,38 @@ class ConfluenceConfig:
             socks_proxy=socks_proxy,
         )
 
+    @staticmethod
+    def _is_oauth_fully_configured(oauth_config: "OAuthConfig") -> bool:
+        """Check if OAuth configuration is complete for either Cloud or Data Center.
+
+        Args:
+            oauth_config: The OAuth configuration to check
+
+        Returns:
+            True if OAuth is fully configured, False otherwise
+        """
+        if not oauth_config:
+            return False
+
+        # Check basic required fields
+        if not all(
+            [
+                oauth_config.client_id,
+                oauth_config.client_secret,
+                oauth_config.redirect_uri,
+                oauth_config.scope,
+            ]
+        ):
+            return False
+
+        # Check instance-specific requirements
+        if oauth_config.is_cloud:
+            # For Cloud, we need a cloud_id
+            return bool(oauth_config.cloud_id)
+        else:
+            # For Data Center, we need an instance_url
+            return bool(oauth_config.instance_url)
+
     def is_auth_configured(self) -> bool:
         """Check if the current authentication configuration is complete and valid for making API calls.
 
@@ -132,14 +164,7 @@ class ConfluenceConfig:
         """
         logger = logging.getLogger("mcp-atlassian.confluence.config")
         if self.auth_type == "oauth":
-            return bool(
-                self.oauth_config
-                and self.oauth_config.client_id
-                and self.oauth_config.client_secret
-                and self.oauth_config.redirect_uri
-                and self.oauth_config.scope
-                and self.oauth_config.cloud_id
-            )
+            return self._is_oauth_fully_configured(self.oauth_config)
         elif self.auth_type == "token":
             return bool(self.personal_token)
         elif self.auth_type == "basic":
