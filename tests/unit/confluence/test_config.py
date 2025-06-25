@@ -90,7 +90,7 @@ def test_is_cloud():
     # Arrange & Act - Server URL
     config = ConfluenceConfig(
         url="https://confluence.example.com",
-        auth_type="token",
+        auth_type="pat",
         personal_token="test",
     )
 
@@ -100,7 +100,7 @@ def test_is_cloud():
     # Arrange & Act - Localhost URL (Data Center/Server)
     config = ConfluenceConfig(
         url="http://localhost:8090",
-        auth_type="token",
+        auth_type="pat",
         personal_token="test",
     )
 
@@ -110,7 +110,7 @@ def test_is_cloud():
     # Arrange & Act - IP localhost URL (Data Center/Server)
     config = ConfluenceConfig(
         url="http://127.0.0.1:8090",
-        auth_type="token",
+        auth_type="pat",
         personal_token="test",
     )
 
@@ -248,10 +248,11 @@ class TestConfluenceDataCenterOAuth:
         ):
             config = ConfluenceConfig.from_env()
 
-            # Should fall back to PAT since OAuth is not fully configured
+            # OAuth is present, so auth_type should be oauth even if incomplete
             assert config.url == "https://confluence.mycompany.com"
-            assert config.auth_type == "token"
+            assert config.auth_type == "oauth"
             assert config.personal_token == "my-pat-token"
+            assert config.oauth_config == mock_oauth_config
             assert not config.is_cloud
 
     def test_is_oauth_fully_configured_data_center_valid(self):

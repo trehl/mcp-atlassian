@@ -6,7 +6,11 @@ from dataclasses import dataclass
 from typing import Literal
 
 from ..utils.env import is_env_ssl_verify
-from ..utils.oauth import OAuthConfig
+from ..utils.oauth import (
+    BYOAccessTokenOAuthConfig,
+    OAuthConfig,
+    get_oauth_config_from_env,
+)
 from ..utils.urls import is_atlassian_cloud_url
 
 
@@ -20,11 +24,11 @@ class ConfluenceConfig:
     """
 
     url: str  # Base URL for Confluence
-    auth_type: Literal["basic", "token", "oauth"]  # Authentication type
+    auth_type: Literal["basic", "pat", "oauth"]  # Authentication type
     username: str | None = None  # Email or username
     api_token: str | None = None  # API token used as password
     personal_token: str | None = None  # Personal access token (Server/DC)
-    oauth_config: OAuthConfig | None = None  # OAuth 2.0 configuration
+    oauth_config: OAuthConfig | BYOAccessTokenOAuthConfig | None = None
     ssl_verify: bool = True  # Whether to verify SSL certificates
     spaces_filter: str | None = None  # List of space keys to filter searches
     http_proxy: str | None = None  # HTTP proxy URL
@@ -62,7 +66,7 @@ class ConfluenceConfig:
             ValueError: If any required environment variable is missing
         """
         url = os.getenv("CONFLUENCE_URL")
-        if not url:
+        if not url and not os.getenv("ATLASSIAN_OAUTH_ENABLE"):
             error_msg = "Missing required CONFLUENCE_URL environment variable"
             raise ValueError(error_msg)
 
@@ -72,24 +76,24 @@ class ConfluenceConfig:
         personal_token = os.getenv("CONFLUENCE_PERSONAL_TOKEN")
 
         # Check for OAuth configuration
-        oauth_config = OAuthConfig.from_env()
-        auth_type = None
+        oauth_config = get_oauth_config_from_env()
+        auth_type: Literal["basic", "pat", "oauth"] | None = None
 
         # Use the shared utility function directly
-        is_cloud = is_atlassian_cloud_url(url)
+        is_cloud = is_atlassian_cloud_url(url) if url else False
 
-        if oauth_config and cls._is_oauth_fully_configured(oauth_config):
-            # OAuth takes precedence if fully configured for either Cloud or Data Center
+        if oauth_config:
+            # OAuth is available - could be full config or minimal config for user-provided tokens
             auth_type = "oauth"
         elif is_cloud:
             if username and api_token:
                 auth_type = "basic"
             else:
-                error_msg = "Cloud authentication requires CONFLUENCE_USERNAME and CONFLUENCE_API_TOKEN, or OAuth configuration"
+                error_msg = "Cloud authentication requires CONFLUENCE_USERNAME and CONFLUENCE_API_TOKEN, or OAuth configuration (set ATLASSIAN_OAUTH_ENABLE=true for user-provided tokens)"
                 raise ValueError(error_msg)
         else:  # Server/Data Center
             if personal_token:
-                auth_type = "token"
+                auth_type = "pat"
             elif username and api_token:
                 # Allow basic auth for Server/DC too
                 auth_type = "basic"
@@ -108,6 +112,14 @@ class ConfluenceConfig:
         https_proxy = os.getenv("CONFLUENCE_HTTPS_PROXY", os.getenv("HTTPS_PROXY"))
         no_proxy = os.getenv("CONFLUENCE_NO_PROXY", os.getenv("NO_PROXY"))
         socks_proxy = os.getenv("CONFLUENCE_SOCKS_PROXY", os.getenv("SOCKS_PROXY"))
+
+        if not url:
+            error_msg = "CONFLUENCE_URL is required"
+            raise ValueError(error_msg)
+
+        if not auth_type:
+            error_msg = "No authentication method configured"
+            raise ValueError(error_msg)
 
         return cls(
             url=url,
@@ -164,8 +176,45 @@ class ConfluenceConfig:
         """
         logger = logging.getLogger("mcp-atlassian.confluence.config")
         if self.auth_type == "oauth":
-            return self._is_oauth_fully_configured(self.oauth_config)
-        elif self.auth_type == "token":
+            # Handle different OAuth configuration types
+            if self.oauth_config:
+                # Full OAuth configuration (traditional mode)
+                if isinstance(self.oauth_config, OAuthConfig):
+                    # For Data Center OAuth, check if it's fully configured
+                    if (
+                        not self.oauth_config.is_cloud
+                        and self._is_oauth_fully_configured(self.oauth_config)
+                    ):
+                        return True
+                    # For Cloud OAuth
+                    elif (
+                        self.oauth_config.client_id
+                        and self.oauth_config.client_secret
+                        and self.oauth_config.redirect_uri
+                        and self.oauth_config.scope
+                        and self.oauth_config.cloud_id
+                    ):
+                        return True
+                    # Minimal OAuth configuration (user-provided tokens mode)
+                    # This is valid if we have oauth_config but missing client credentials
+                    # In this case, we expect authentication to come from user-provided headers
+                    elif (
+                        not self.oauth_config.client_id
+                        and not self.oauth_config.client_secret
+                    ):
+                        logger.debug(
+                            "Minimal OAuth config detected - expecting user-provided tokens via headers"
+                        )
+                        return True
+                # Bring Your Own Access Token mode
+                elif isinstance(self.oauth_config, BYOAccessTokenOAuthConfig):
+                    if self.oauth_config.cloud_id and self.oauth_config.access_token:
+                        return True
+
+            # Partial configuration is invalid
+            logger.warning("Incomplete OAuth configuration detected")
+            return False
+        elif self.auth_type == "pat":
             return bool(self.personal_token)
         elif self.auth_type == "basic":
             return bool(self.username and self.api_token)

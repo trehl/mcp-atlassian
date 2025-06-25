@@ -477,73 +477,145 @@ class OAuthConfig:
         - ATLASSIAN_OAUTH_CLOUD_ID: Cloud ID (Cloud only, optional)
 
         Returns:
-            OAuthConfig instance or None if required environment variables are missing
+            OAuthConfig instance or None if OAuth is not enabled
         """
+        # Check if OAuth is explicitly enabled (allows minimal config)
+        oauth_enabled = os.getenv("ATLASSIAN_OAUTH_ENABLE", "").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+
         # Check for required environment variables
         client_id = os.getenv("ATLASSIAN_OAUTH_CLIENT_ID")
         client_secret = os.getenv("ATLASSIAN_OAUTH_CLIENT_SECRET")
         redirect_uri = os.getenv("ATLASSIAN_OAUTH_REDIRECT_URI")
         scope = os.getenv("ATLASSIAN_OAUTH_SCOPE")
 
-        # All of these are required for OAuth configuration
-        if not all([client_id, client_secret, redirect_uri, scope]):
-            return None
+        # Full OAuth configuration (traditional mode)
+        if all([client_id, client_secret, redirect_uri, scope]):
+            # Determine instance type
+            instance_type = os.getenv("ATLASSIAN_OAUTH_INSTANCE_TYPE", "cloud").lower()
+            if instance_type not in ["cloud", "datacenter"]:
+                logger.warning(
+                    f"Invalid ATLASSIAN_OAUTH_INSTANCE_TYPE: {instance_type}. Defaulting to 'cloud'."
+                )
+                instance_type = "cloud"
 
-        # Determine instance type
-        instance_type = os.getenv("ATLASSIAN_OAUTH_INSTANCE_TYPE", "cloud").lower()
-        if instance_type not in ["cloud", "datacenter"]:
-            logger.warning(
-                f"Invalid ATLASSIAN_OAUTH_INSTANCE_TYPE: {instance_type}. Defaulting to 'cloud'."
+            # Get instance-specific configuration
+            instance_url = os.getenv("ATLASSIAN_OAUTH_INSTANCE_URL")
+            cloud_id = os.getenv("ATLASSIAN_OAUTH_CLOUD_ID")
+
+            # Debug logging for environment variables
+            if instance_type == "datacenter":
+                logger.debug("Data Center OAuth configuration:")
+                logger.debug(f"  instance_url from env: {instance_url}")
+                logger.debug(f"  instance_type: {instance_type}")
+
+            # Validate instance-specific requirements
+            if instance_type == "datacenter" and not instance_url:
+                logger.error(
+                    "ATLASSIAN_OAUTH_INSTANCE_URL is required for Data Center OAuth"
+                )
+                return None
+
+            # Create the OAuth configuration with full credentials
+            config = cls(
+                client_id=client_id,
+                client_secret=client_secret,
+                redirect_uri=redirect_uri,
+                scope=scope,
+                instance_type=instance_type,
+                instance_url=instance_url,
+                cloud_id=cloud_id,
             )
-            instance_type = "cloud"
 
-        # Get instance-specific configuration
-        instance_url = os.getenv("ATLASSIAN_OAUTH_INSTANCE_URL")
+            # Try to load existing tokens
+            token_data = cls.load_tokens(client_id)
+            if token_data:
+                config.refresh_token = token_data.get("refresh_token")
+                config.access_token = token_data.get("access_token")
+                config.expires_at = token_data.get("expires_at")
+                # Load instance-specific data from stored tokens
+                if not config.cloud_id and "cloud_id" in token_data:
+                    config.cloud_id = token_data["cloud_id"]
+                if "instance_type" in token_data:
+                    config.instance_type = token_data["instance_type"]
+                if not config.instance_url and "instance_url" in token_data:
+                    config.instance_url = token_data["instance_url"]
+
+            return config
+
+        # Minimal OAuth configuration (user-provided tokens mode)
+        elif oauth_enabled:
+            # Create minimal config that works with user-provided tokens
+            logger.info(
+                "Creating minimal OAuth config for user-provided tokens (ATLASSIAN_OAUTH_ENABLE=true)"
+            )
+            return cls(
+                client_id="",  # Will be provided by user tokens
+                client_secret="",  # Not needed for user tokens
+                redirect_uri="",  # Not needed for user tokens
+                scope="",  # Will be determined by user token permissions
+                cloud_id=os.getenv("ATLASSIAN_OAUTH_CLOUD_ID"),  # Optional fallback
+            )
+
+        # No OAuth configuration
+        return None
+
+
+@dataclass
+class BYOAccessTokenOAuthConfig:
+    """OAuth configuration when providing a pre-existing access token.
+
+    This class is used when the user provides their own Atlassian Cloud ID
+    and access token directly, bypassing the full OAuth 2.0 (3LO) flow.
+    It's suitable for scenarios like service accounts or CI/CD pipelines
+    where an access token is already available.
+
+    This configuration does not support token refreshing.
+    """
+
+    cloud_id: str
+    access_token: str
+    refresh_token: None = None
+    expires_at: None = None
+
+    @classmethod
+    def from_env(cls) -> Optional["BYOAccessTokenOAuthConfig"]:
+        """Create a BYOAccessTokenOAuthConfig from environment variables.
+
+        Reads `ATLASSIAN_OAUTH_CLOUD_ID` and `ATLASSIAN_OAUTH_ACCESS_TOKEN`.
+
+        Returns:
+            BYOAccessTokenOAuthConfig instance or None if required
+            environment variables are missing.
+        """
         cloud_id = os.getenv("ATLASSIAN_OAUTH_CLOUD_ID")
+        access_token = os.getenv("ATLASSIAN_OAUTH_ACCESS_TOKEN")
 
-        # Debug logging for environment variables
-        if instance_type == "datacenter":
-            logger.debug("Data Center OAuth configuration:")
-            logger.debug(f"  instance_url from env: {instance_url}")
-            logger.debug(f"  instance_type: {instance_type}")
-
-        # Validate instance-specific requirements
-        if instance_type == "datacenter" and not instance_url:
-            logger.error(
-                "ATLASSIAN_OAUTH_INSTANCE_URL is required for Data Center OAuth"
-            )
+        if not all([cloud_id, access_token]):
             return None
 
-        # Create the OAuth configuration
-        config = cls(
-            client_id=client_id,
-            client_secret=client_secret,
-            redirect_uri=redirect_uri,
-            scope=scope,
-            instance_type=instance_type,
-            instance_url=instance_url,
-            cloud_id=cloud_id,
-        )
+        return cls(cloud_id=cloud_id, access_token=access_token)
 
-        # Try to load existing tokens
-        token_data = cls.load_tokens(client_id)
-        if token_data:
-            config.refresh_token = token_data.get("refresh_token")
-            config.access_token = token_data.get("access_token")
-            config.expires_at = token_data.get("expires_at")
-            # Load instance-specific data from stored tokens
-            if not config.cloud_id and "cloud_id" in token_data:
-                config.cloud_id = token_data["cloud_id"]
-            if "instance_type" in token_data:
-                config.instance_type = token_data["instance_type"]
-            if not config.instance_url and "instance_url" in token_data:
-                config.instance_url = token_data["instance_url"]
 
-        return config
+def get_oauth_config_from_env() -> OAuthConfig | BYOAccessTokenOAuthConfig | None:
+    """Get the appropriate OAuth configuration from environment variables.
+
+    This function attempts to load standard OAuth configuration first (OAuthConfig).
+    If that's not available, it tries to load a "Bring Your Own Access Token"
+    configuration (BYOAccessTokenOAuthConfig).
+
+    Returns:
+        An instance of OAuthConfig or BYOAccessTokenOAuthConfig if environment
+        variables are set for either, otherwise None.
+    """
+    return BYOAccessTokenOAuthConfig.from_env() or OAuthConfig.from_env()
 
 
 def configure_oauth_session(
-    session: requests.Session, oauth_config: OAuthConfig
+    session: requests.Session, oauth_config: OAuthConfig | BYOAccessTokenOAuthConfig
 ) -> bool:
     """Configure a requests session with OAuth 2.0 authentication.
 
@@ -571,6 +643,11 @@ def configure_oauth_session(
         return True
     logger.debug("configure_oauth_session: Proceeding to ensure_valid_token.")
     # Otherwise, ensure we have a valid token (refresh if needed)
+    if isinstance(oauth_config, BYOAccessTokenOAuthConfig):
+        logger.error(
+            "configure_oauth_session: oauth access token configuration provided as empty string."
+        )
+        return False
     if not oauth_config.ensure_valid_token():
         logger.error(
             f"configure_oauth_session: ensure_valid_token returned False. "

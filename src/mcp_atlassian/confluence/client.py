@@ -38,16 +38,27 @@ class ConfluenceClient:
                 error_msg = "OAuth authentication requires oauth_config"
                 raise ValueError(error_msg)
 
+            # Import OAuthConfig type for isinstance check
+            from ..utils.oauth import BYOAccessTokenOAuthConfig, OAuthConfig
+
             # Validate OAuth configuration based on instance type
-            if self.config.oauth_config.is_cloud:
+            if isinstance(self.config.oauth_config, OAuthConfig):
+                if self.config.oauth_config.is_cloud:
+                    if not self.config.oauth_config.cloud_id:
+                        error_msg = (
+                            "OAuth authentication for Cloud requires a valid cloud_id"
+                        )
+                        raise ValueError(error_msg)
+                else:  # Data Center
+                    if not self.config.oauth_config.instance_url:
+                        error_msg = "OAuth authentication for Data Center requires a valid instance_url"
+                        raise ValueError(error_msg)
+            elif isinstance(self.config.oauth_config, BYOAccessTokenOAuthConfig):
+                # BYO token only supports Cloud
                 if not self.config.oauth_config.cloud_id:
                     error_msg = (
-                        "OAuth authentication for Cloud requires a valid cloud_id"
+                        "BYO Access Token authentication requires a valid cloud_id"
                     )
-                    raise ValueError(error_msg)
-            else:  # Data Center
-                if not self.config.oauth_config.instance_url:
-                    error_msg = "OAuth authentication for Data Center requires a valid instance_url"
                     raise ValueError(error_msg)
 
             # Create a session for OAuth
@@ -59,14 +70,19 @@ class ConfluenceClient:
                 raise MCPAtlassianAuthenticationError(error_msg)
 
             # Determine the API URL based on instance type
-            if self.config.oauth_config.is_cloud:
-                # Cloud uses the special OAuth API URL with cloud_id
+            if isinstance(self.config.oauth_config, OAuthConfig):
+                if self.config.oauth_config.is_cloud:
+                    # Cloud uses the special OAuth API URL with cloud_id
+                    api_url = f"https://api.atlassian.com/ex/confluence/{self.config.oauth_config.cloud_id}"
+                    is_cloud_instance = True
+                else:
+                    # Data Center uses the direct instance URL
+                    api_url = self.config.oauth_config.instance_url
+                    is_cloud_instance = False
+            else:  # BYOAccessTokenOAuthConfig
+                # BYO token only supports Cloud
                 api_url = f"https://api.atlassian.com/ex/confluence/{self.config.oauth_config.cloud_id}"
                 is_cloud_instance = True
-            else:
-                # Data Center uses the direct instance URL
-                api_url = self.config.oauth_config.instance_url
-                is_cloud_instance = False
 
             # Initialize Confluence with the session
             self.confluence = Confluence(
@@ -75,7 +91,7 @@ class ConfluenceClient:
                 cloud=is_cloud_instance,
                 verify_ssl=self.config.ssl_verify,
             )
-        elif self.config.auth_type == "token":
+        elif self.config.auth_type == "pat":
             logger.debug(
                 f"Initializing Confluence client with Token (PAT) auth. "
                 f"URL: {self.config.url}, "
