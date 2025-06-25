@@ -44,8 +44,8 @@ CLOUD_AUTHORIZE_URL = "https://auth.atlassian.com/authorize"
 CLOUD_ID_URL = "https://api.atlassian.com/oauth/token/accessible-resources"
 
 # Constants for Data Center OAuth (endpoints will be constructed with instance URL)
-DATACENTER_TOKEN_PATH = "/plugins/servlet/oauth/access-token"  # noqa: S105 - This is a URL path, not a password
-DATACENTER_AUTHORIZE_PATH = "/plugins/servlet/oauth/authorize"
+DATACENTER_TOKEN_PATH = "/rest/oauth2/latest/token"  # noqa: S105 - This is a URL path, not a password
+DATACENTER_AUTHORIZE_PATH = "/rest/oauth2/latest/authorize"
 
 # Common constants
 TOKEN_EXPIRY_MARGIN = 300  # 5 minutes in seconds
@@ -500,6 +500,12 @@ class OAuthConfig:
         # Get instance-specific configuration
         instance_url = os.getenv("ATLASSIAN_OAUTH_INSTANCE_URL")
         cloud_id = os.getenv("ATLASSIAN_OAUTH_CLOUD_ID")
+
+        # Debug logging for environment variables
+        if instance_type == "datacenter":
+            logger.debug("Data Center OAuth configuration:")
+            logger.debug(f"  instance_url from env: {instance_url}")
+            logger.debug(f"  instance_type: {instance_type}")
 
         # Validate instance-specific requirements
         if instance_type == "datacenter" and not instance_url:

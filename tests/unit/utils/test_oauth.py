@@ -652,7 +652,7 @@ class TestDataCenterOAuth:
             instance_url="https://confluence.mycompany.com",
         )
         expected_url = (
-            "https://confluence.mycompany.com/plugins/servlet/oauth/access-token"
+            "https://confluence.mycompany.com/rest/oauth2/latest/token"
         )
         assert config.token_url == expected_url
 
@@ -667,7 +667,7 @@ class TestDataCenterOAuth:
             instance_url="https://confluence.mycompany.com/",
         )
         expected_url = (
-            "https://confluence.mycompany.com/plugins/servlet/oauth/access-token"
+            "https://confluence.mycompany.com/rest/oauth2/latest/token"
         )
         assert config.token_url == expected_url
 
@@ -682,7 +682,7 @@ class TestDataCenterOAuth:
             instance_url="https://confluence.mycompany.com",
         )
         expected_url = (
-            "https://confluence.mycompany.com/plugins/servlet/oauth/authorize"
+            "https://confluence.mycompany.com/rest/oauth2/latest/authorize"
         )
         assert config.authorize_url_base == expected_url
 
@@ -706,8 +706,7 @@ class TestDataCenterOAuth:
         # Check base URL
         base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
         assert (
-            base_url
-            == "https://confluence.mycompany.com/plugins/servlet/oauth/authorize"
+            base_url == "https://confluence.mycompany.com/rest/oauth2/latest/authorize"
         )
 
         # Check parameters
@@ -820,7 +819,7 @@ class TestDataCenterOAuth:
 
         # Verify the correct endpoint was called
         expected_url = (
-            "https://confluence.mycompany.com/plugins/servlet/oauth/access-token"
+            "https://confluence.mycompany.com/rest/oauth2/latest/token"
         )
         mock_post.assert_called_once()
         call_args = mock_post.call_args
