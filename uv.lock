@@ -763,7 +763,7 @@ cli = [
 
 [[package]]
 name = "mcp-atlassian"
-version = "0.11.6.dev5+ddeae06"
+version = "0.11.9.dev5+2b028f2"
 source = { editable = "." }
 dependencies = [
     { name = "atlassian-python-api" },
