@@ -1,4 +1,4 @@
-"""Configuration module for the Confluence client."""
+"""Configuration module for Confluence API interactions."""
 
 import logging
 import os
@@ -12,6 +12,8 @@ from ..utils.oauth import (
     get_oauth_config_from_env,
 )
 from ..utils.urls import is_atlassian_cloud_url
+
+logger = logging.getLogger("mcp-atlassian.confluence.config")
 
 
 @dataclass
@@ -76,8 +78,11 @@ class ConfluenceConfig:
         Raises:
             ValueError: If any required environment variable is missing
         """
+        # Check if minimal OAuth mode is enabled
+        oauth_enabled = os.getenv("ATLASSIAN_OAUTH_ENABLE", "").lower() in ("true", "1", "yes")
+        
         url = os.getenv("CONFLUENCE_URL")
-        if not url and not os.getenv("ATLASSIAN_OAUTH_ENABLE"):
+        if not url and not oauth_enabled:
             error_msg = "Missing required CONFLUENCE_URL environment variable"
             raise ValueError(error_msg)
 
@@ -91,18 +96,18 @@ class ConfluenceConfig:
         auth_type = None
 
         # Use the shared utility function directly
-        is_cloud = is_atlassian_cloud_url(url)
+        is_cloud = is_atlassian_cloud_url(url) if url else True  # Default to cloud if no URL
 
         if oauth_config:
             # OAuth is available - could be full config or minimal config for user-provided tokens
             auth_type = "oauth"
-        elif is_cloud:
+        elif url and is_cloud:
             if username and api_token:
                 auth_type = "basic"
             else:
                 error_msg = "Cloud authentication requires CONFLUENCE_USERNAME and CONFLUENCE_API_TOKEN, or OAuth configuration (set ATLASSIAN_OAUTH_ENABLE=true for user-provided tokens)"
                 raise ValueError(error_msg)
-        else:  # Server/Data Center
+        elif url:  # Server/Data Center
             if personal_token:
                 auth_type = "pat"
             elif username and api_token:
@@ -111,6 +116,13 @@ class ConfluenceConfig:
             else:
                 error_msg = "Server/Data Center authentication requires CONFLUENCE_PERSONAL_TOKEN or CONFLUENCE_USERNAME and CONFLUENCE_API_TOKEN"
                 raise ValueError(error_msg)
+        elif oauth_enabled:
+            # Minimal OAuth mode - URL will be provided per-request
+            auth_type = "oauth"
+            url = "https://placeholder.atlassian.net/wiki"  # Placeholder URL, will be overridden per-request
+            logger.info("Confluence configured in minimal OAuth mode - URLs will be provided per-request via X-Confluence-URL header")
+        else:
+            raise ValueError("No valid authentication configuration found")
 
         # SSL verification (for Server/DC)
         ssl_verify = is_env_ssl_verify("CONFLUENCE_SSL_VERIFY")

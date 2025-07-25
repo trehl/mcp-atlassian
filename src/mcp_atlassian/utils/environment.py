@@ -10,9 +10,19 @@ logger = logging.getLogger("mcp-atlassian.utils.environment")
 
 def get_available_services() -> dict[str, bool | None]:
     """Determine which services are available based on environment variables."""
+    # Check if minimal OAuth mode is enabled
+    oauth_enabled = os.getenv("ATLASSIAN_OAUTH_ENABLE", "").lower() in ("true", "1", "yes")
+    
     confluence_url = os.getenv("CONFLUENCE_URL")
     confluence_is_setup = False
-    if confluence_url:
+    
+    # In minimal OAuth mode, service is available even without URLs
+    if oauth_enabled and not confluence_url:
+        confluence_is_setup = True
+        logger.info(
+            "Confluence available in minimal OAuth mode - expecting URLs via X-Confluence-URL header"
+        )
+    elif confluence_url:
         is_cloud = is_atlassian_cloud_url(confluence_url)
 
         # OAuth check (highest precedence, applies to Cloud)
@@ -59,7 +69,7 @@ def get_available_services() -> dict[str, bool | None]:
                 logger.info(
                     "Using Confluence Server/Data Center authentication (PAT or Basic Auth)"
                 )
-    elif os.getenv("ATLASSIAN_OAUTH_ENABLE", "").lower() in ("true", "1", "yes"):
+    elif oauth_enabled:
         confluence_is_setup = True
         logger.info(
             "Using Confluence minimal OAuth configuration - expecting user-provided tokens via headers"
@@ -67,7 +77,14 @@ def get_available_services() -> dict[str, bool | None]:
 
     jira_url = os.getenv("JIRA_URL")
     jira_is_setup = False
-    if jira_url:
+    
+    # In minimal OAuth mode, service is available even without URLs
+    if oauth_enabled and not jira_url:
+        jira_is_setup = True
+        logger.info(
+            "Jira available in minimal OAuth mode - expecting URLs via X-Jira-URL header"
+        )
+    elif jira_url:
         is_cloud = is_atlassian_cloud_url(jira_url)
 
         # OAuth check (highest precedence, applies to Cloud)
@@ -112,7 +129,7 @@ def get_available_services() -> dict[str, bool | None]:
                 logger.info(
                     "Using Jira Server/Data Center authentication (PAT or Basic Auth)"
                 )
-    elif os.getenv("ATLASSIAN_OAUTH_ENABLE", "").lower() in ("true", "1", "yes"):
+    elif oauth_enabled:
         jira_is_setup = True
         logger.info(
             "Using Jira minimal OAuth configuration - expecting user-provided tokens via headers"

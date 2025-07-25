@@ -431,55 +431,108 @@ MCP Atlassian supports multi-cloud OAuth scenarios where each user connects to t
 
 **Minimal OAuth Configuration:**
 
-1. Enable minimal OAuth mode (no client credentials required):
+1. Enable minimal OAuth mode (no URLs or client credentials required):
    ```bash
    docker run -e ATLASSIAN_OAUTH_ENABLE=true -p 9000:9000 \
      ghcr.io/sooperset/mcp-atlassian:latest \
      --transport streamable-http --port 9000
    ```
 
-2. Users provide authentication via HTTP headers:
-   - `Authorization: Bearer <user_oauth_token>`
-   - `X-Atlassian-Cloud-Id: <user_cloud_id>`
+2. Users provide authentication and URLs via HTTP headers:
+   - `Authorization: Bearer <user_oauth_token>` or `Authorization: Token <user_pat>`
+   - `X-Atlassian-Cloud-Id: <user_cloud_id>` (optional)
+   - `X-Jira-URL: <jira_instance_url>` (required if using Jira)
+   - `X-Confluence-URL: <confluence_instance_url>` (required if using Confluence)
 
-**Example Integration (Python):**
+**Example Integration (Python) - Multiple Organizations:**
 ```python
 import asyncio
 from mcp.client.streamable_http import streamablehttp_client
 from mcp import ClientSession
 
-user_token = "user-specific-oauth-token"
-user_cloud_id = "user-specific-cloud-id"
-
-async def main():
-    # Connect to streamable HTTP server with custom headers
+async def connect_to_company_a():
+    # Company A's Atlassian instance
     async with streamablehttp_client(
         "http://localhost:9000/mcp",
         headers={
-            "Authorization": f"Bearer {user_token}",
-            "X-Atlassian-Cloud-Id": user_cloud_id
+            "Authorization": "Bearer <COMPANY_A_OAUTH_TOKEN>",
+            "X-Atlassian-Cloud-Id": "<COMPANY_A_CLOUD_ID>",
+            "X-Jira-URL": "https://company-a.atlassian.net",
+            "X-Confluence-URL": "https://company-a.atlassian.net/wiki"
         }
     ) as (read_stream, write_stream, _):
-        # Create a session using the client streams
         async with ClientSession(read_stream, write_stream) as session:
-            # Initialize the connection
             await session.initialize()
-
-            # Example: Get a Jira issue
+            
+            # Get issue from Company A's Jira
             result = await session.call_tool(
                 "jira_get_issue",
                 {"issue_key": "PROJ-123"}
             )
-            print(result)
+            print(f"Company A Issue: {result}")
+
+async def connect_to_company_b():
+    # Company B's Atlassian instance (different URL entirely)
+    async with streamablehttp_client(
+        "http://localhost:9000/mcp",
+        headers={
+            "Authorization": "Bearer <COMPANY_B_OAUTH_TOKEN>",
+            "X-Atlassian-Cloud-Id": "<COMPANY_B_CLOUD_ID>",
+            "X-Jira-URL": "https://company-b.atlassian.net",
+            "X-Confluence-URL": "https://company-b.atlassian.net/wiki"
+        }
+    ) as (read_stream, write_stream, _):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            
+            # Search in Company B's Confluence
+            result = await session.call_tool(
+                "confluence_search",
+                {"cql": "text ~ 'quarterly report'"}
+            )
+            print(f"Company B Results: {result}")
+
+# Run both connections in parallel to different organizations
+async def main():
+    await asyncio.gather(
+        connect_to_company_a(),
+        connect_to_company_b()
+    )
 
 asyncio.run(main())
 ```
 
 **Configuration Notes:**
-- Each request can use a different cloud instance via the `X-Atlassian-Cloud-Id` header
-- User tokens are isolated per request - no cross-tenant data leakage
+- **No URL configuration required at startup** - URLs are provided per-request via headers
+- Each request can connect to a completely different Atlassian instance
+- Supports both Cloud (OAuth) and Server/Data Center (PAT) in the same deployment
+- User tokens and URLs are isolated per request - no cross-tenant data leakage
 - Falls back to global `ATLASSIAN_OAUTH_CLOUD_ID` if header not provided
-- Compatible with standard OAuth 2.0 bearer token authentication
+- Compatible with standard OAuth 2.0 bearer token and PAT authentication
+
+**IDE Configuration Example (Multi-Tenant):**
+```json
+{
+  "mcpServers": {
+    "company-a-atlassian": {
+      "url": "http://localhost:9000/mcp",
+      "headers": {
+        "Authorization": "Bearer <COMPANY_A_USER_TOKEN>",
+        "X-Jira-URL": "https://company-a.atlassian.net",
+        "X-Confluence-URL": "https://company-a.atlassian.net/wiki"
+      }
+    },
+    "company-b-atlassian": {
+      "url": "http://localhost:9000/mcp",
+      "headers": {
+        "Authorization": "Bearer <COMPANY_B_USER_TOKEN>",
+        "X-Jira-URL": "https://company-b.atlassian.net",
+        "X-Confluence-URL": "https://company-b.atlassian.net/wiki"
+      }
+    }
+  }
+}
+```
 
 </details>
 

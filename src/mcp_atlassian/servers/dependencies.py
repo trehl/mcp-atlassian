@@ -8,6 +8,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 from typing import TYPE_CHECKING, Any
+import os
 
 from fastmcp import Context
 from fastmcp.server.dependencies import get_http_request
@@ -32,6 +33,7 @@ def _create_user_config_for_fetcher(
     auth_type: str,
     credentials: dict[str, Any],
     cloud_id: str | None = None,
+    url_override: str | None = None,
 ) -> JiraConfig | ConfluenceConfig:
     """Create a user-specific configuration for Jira or Confluence fetchers.
 
@@ -40,6 +42,7 @@ def _create_user_config_for_fetcher(
         auth_type: The authentication type ('oauth' or 'pat').
         credentials: Dictionary of credentials (token, email, etc).
         cloud_id: Optional cloud ID to override the base config cloud ID.
+        url_override: Optional URL to override the base config URL for multi-tenant support.
 
     Returns:
         JiraConfig or ConfluenceConfig with user-specific credentials.
@@ -56,11 +59,14 @@ def _create_user_config_for_fetcher(
     username_for_config: str | None = credentials.get("user_email_context")
 
     logger.debug(
-        f"Creating user config for fetcher. Auth type: {auth_type}, Credentials keys: {credentials.keys()}, Cloud ID: {cloud_id}"
+        f"Creating user config for fetcher. Auth type: {auth_type}, Credentials keys: {credentials.keys()}, Cloud ID: {cloud_id}, URL override: {url_override}"
     )
 
+    # Use URL override if provided, otherwise use base config URL
+    effective_url = url_override if url_override else base_config.url
+
     common_args: dict[str, Any] = {
-        "url": base_config.url,
+        "url": effective_url,
         "auth_type": auth_type,
         "ssl_verify": base_config.ssl_verify,
         "http_proxy": base_config.http_proxy,
@@ -190,6 +196,7 @@ async def get_jira_fetcher(ctx: Context) -> JiraFetcher:
                 request.state, "user_atlassian_email", None
             )  # May be None for PAT
             user_cloud_id = getattr(request.state, "user_atlassian_cloud_id", None)
+            user_jira_url = getattr(request.state, "user_jira_url", None)
 
             if not user_token:
                 raise ValueError("User Atlassian token found in state but is empty.")
@@ -205,19 +212,41 @@ async def get_jira_fetcher(ctx: Context) -> JiraFetcher:
                 else None
             )
             if not app_lifespan_ctx or not app_lifespan_ctx.full_jira_config:
-                raise ValueError(
-                    "Jira global configuration (URL, SSL) is not available from lifespan context."
-                )
+                # In minimal OAuth mode, create a base config if not available
+                if os.getenv("ATLASSIAN_OAUTH_ENABLE", "").lower() in ("true", "1", "yes") and user_jira_url:
+                    # Create minimal base config for user-provided URL
+                    from ..jira.config import JiraConfig
+                    from ..utils.oauth import OAuthConfig
+                    minimal_oauth = OAuthConfig(
+                        client_id="",
+                        client_secret="",
+                        redirect_uri="",
+                        scope="",
+                        cloud_id=user_cloud_id,
+                    )
+                    base_jira_config = JiraConfig(
+                        url=user_jira_url,  # Use user URL as base
+                        auth_type="oauth",
+                        oauth_config=minimal_oauth,
+                    )
+                else:
+                    raise ValueError(
+                        "Jira global configuration (URL, SSL) is not available from lifespan context."
+                    )
+            else:
+                base_jira_config = app_lifespan_ctx.full_jira_config
 
             cloud_id_info = f" with cloudId {user_cloud_id}" if user_cloud_id else ""
+            url_info = f" and URL {user_jira_url}" if user_jira_url else ""
             logger.info(
-                f"Creating user-specific JiraFetcher (type: {user_auth_type}) for user {user_email or 'unknown'} (token ...{str(user_token)[-8:]}){cloud_id_info}"
+                f"Creating user-specific JiraFetcher (type: {user_auth_type}) for user {user_email or 'unknown'} (token ...{str(user_token)[-8:]}){cloud_id_info}{url_info}"
             )
             user_specific_config = _create_user_config_for_fetcher(
-                base_config=app_lifespan_ctx.full_jira_config,
+                base_config=base_jira_config,
                 auth_type=user_auth_type,
                 credentials=credentials,
                 cloud_id=user_cloud_id,
+                url_override=user_jira_url,
             )
             try:
                 user_jira_fetcher = JiraFetcher(config=user_specific_config)
@@ -295,8 +324,11 @@ async def get_confluence_fetcher(ctx: Context) -> ConfluenceFetcher:
             request.state, "user_atlassian_token"
         ):
             user_token = getattr(request.state, "user_atlassian_token", None)
-            user_email = getattr(request.state, "user_atlassian_email", None)
+            user_email = getattr(
+                request.state, "user_atlassian_email", None
+            )  # May be None for PAT
             user_cloud_id = getattr(request.state, "user_atlassian_cloud_id", None)
+            user_confluence_url = getattr(request.state, "user_confluence_url", None)
 
             if not user_token:
                 raise ValueError("User Atlassian token found in state but is empty.")
@@ -312,19 +344,41 @@ async def get_confluence_fetcher(ctx: Context) -> ConfluenceFetcher:
                 else None
             )
             if not app_lifespan_ctx or not app_lifespan_ctx.full_confluence_config:
-                raise ValueError(
-                    "Confluence global configuration (URL, SSL) is not available from lifespan context."
-                )
+                # In minimal OAuth mode, create a base config if not available
+                if os.getenv("ATLASSIAN_OAUTH_ENABLE", "").lower() in ("true", "1", "yes") and user_confluence_url:
+                    # Create minimal base config for user-provided URL
+                    from ..confluence.config import ConfluenceConfig
+                    from ..utils.oauth import OAuthConfig
+                    minimal_oauth = OAuthConfig(
+                        client_id="",
+                        client_secret="",
+                        redirect_uri="",
+                        scope="",
+                        cloud_id=user_cloud_id,
+                    )
+                    base_confluence_config = ConfluenceConfig(
+                        url=user_confluence_url,  # Use user URL as base
+                        auth_type="oauth",
+                        oauth_config=minimal_oauth,
+                    )
+                else:
+                    raise ValueError(
+                        "Confluence global configuration (URL, SSL) is not available from lifespan context."
+                    )
+            else:
+                base_confluence_config = app_lifespan_ctx.full_confluence_config
 
             cloud_id_info = f" with cloudId {user_cloud_id}" if user_cloud_id else ""
+            url_info = f" and URL {user_confluence_url}" if user_confluence_url else ""
             logger.info(
-                f"Creating user-specific ConfluenceFetcher (type: {user_auth_type}) for user {user_email or 'unknown'} (token ...{str(user_token)[-8:]}){cloud_id_info}"
+                f"Creating user-specific ConfluenceFetcher (type: {user_auth_type}) for user {user_email or 'unknown'} (token ...{str(user_token)[-8:]}){cloud_id_info}{url_info}"
             )
             user_specific_config = _create_user_config_for_fetcher(
-                base_config=app_lifespan_ctx.full_confluence_config,
+                base_config=base_confluence_config,
                 auth_type=user_auth_type,
                 credentials=credentials,
                 cloud_id=user_cloud_id,
+                url_override=user_confluence_url,
             )
             try:
                 user_confluence_fetcher = ConfluenceFetcher(config=user_specific_config)

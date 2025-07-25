@@ -240,6 +240,8 @@ class UserTokenMiddleware(BaseHTTPMiddleware):
         if request_path == mcp_path and request.method == "POST":
             auth_header = request.headers.get("Authorization")
             cloud_id_header = request.headers.get("X-Atlassian-Cloud-Id")
+            jira_url_header = request.headers.get("X-Jira-URL")
+            confluence_url_header = request.headers.get("X-Confluence-URL")
 
             token_for_log = mask_sensitive(
                 auth_header.split(" ", 1)[1].strip()
@@ -247,7 +249,7 @@ class UserTokenMiddleware(BaseHTTPMiddleware):
                 else auth_header
             )
             logger.debug(
-                f"UserTokenMiddleware: Path='{request.url.path}', AuthHeader='{mask_sensitive(auth_header)}', ParsedToken(masked)='{token_for_log}', CloudId='{cloud_id_header}'"
+                f"UserTokenMiddleware: Path='{request.url.path}', AuthHeader='{mask_sensitive(auth_header)}', ParsedToken(masked)='{token_for_log}', CloudId='{cloud_id_header}', JiraURL='{jira_url_header}', ConfluenceURL='{confluence_url_header}'"
             )
 
             # Extract and save cloudId if provided
@@ -261,6 +263,24 @@ class UserTokenMiddleware(BaseHTTPMiddleware):
                 logger.debug(
                     "UserTokenMiddleware: No cloudId header provided, will use global config"
                 )
+            
+            # Extract and save Jira URL if provided
+            if jira_url_header and jira_url_header.strip():
+                request.state.user_jira_url = jira_url_header.strip()
+                logger.debug(
+                    f"UserTokenMiddleware: Extracted Jira URL from header: {jira_url_header.strip()}"
+                )
+            else:
+                request.state.user_jira_url = None
+                
+            # Extract and save Confluence URL if provided
+            if confluence_url_header and confluence_url_header.strip():
+                request.state.user_confluence_url = confluence_url_header.strip()
+                logger.debug(
+                    f"UserTokenMiddleware: Extracted Confluence URL from header: {confluence_url_header.strip()}"
+                )
+            else:
+                request.state.user_confluence_url = None
 
             # Check for mcp-session-id header for debugging
             mcp_session_id = request.headers.get("mcp-session-id")
